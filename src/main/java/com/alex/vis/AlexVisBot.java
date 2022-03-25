@@ -1,11 +1,14 @@
 package com.alex.vis;
 
 import com.alex.vis.entity.Currency;
+import com.alex.vis.service.CurrencyConversionService;
 import com.alex.vis.service.CurrencyModeService;
 import lombok.SneakyThrows;
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
 import org.telegram.telegrambots.meta.TelegramBotsApi;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
+import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageReplyMarkup;
+import org.telegram.telegrambots.meta.api.objects.CallbackQuery;
 import org.telegram.telegrambots.meta.api.objects.Message;
 import org.telegram.telegrambots.meta.api.objects.MessageEntity;
 import org.telegram.telegrambots.meta.api.objects.Update;
@@ -21,6 +24,7 @@ import java.util.Optional;
 public class AlexVisBot extends TelegramLongPollingBot {
 
     private final CurrencyModeService currencyModeService = CurrencyModeService.getInstance();
+    private final CurrencyConversionService conversionService = CurrencyConversionService.getInstance();
 
     //Заменяет throws Exception в сигнатуре метода
     @SneakyThrows
@@ -53,10 +57,65 @@ public class AlexVisBot extends TelegramLongPollingBot {
     @Override
     @SneakyThrows
     public void onUpdateReceived(Update update) {
+        //CallBackQuery - это нажатие на кнопку в чате. Тут делаем его обработку
+        if (update.hasCallbackQuery()) {
+            handleCallBack(update.getCallbackQuery());
+        }
+
         //Мы добавили чат боте прямо в телеграмме команду /set_currency
         if (update.hasMessage()) {
             handleMessage(update.getMessage());
         }
+    }
+
+    @SneakyThrows
+    private void handleCallBack(CallbackQuery callbackQuery) {
+        Message message = callbackQuery.getMessage();
+        //getData() - Тут наш payLoad - полезная нагрузка. у нас тут зашита Currency: имя валюты
+        String[] param = callbackQuery.getData().split(":");
+        String action = param[0];
+        Currency newCurrency = Currency.valueOf(param[1]);
+
+        switch (action) {
+            case "ORIGINAL":
+                currencyModeService.setOriginalCurrency(message.getChatId(), newCurrency);
+                break;
+            case "TARGET":
+                currencyModeService.setTargetCurrency(message.getChatId(), newCurrency);
+                break;
+        }
+
+        List<List<InlineKeyboardButton>> buttons = new ArrayList<>();
+        Currency originalCurrency = currencyModeService.getOriginalCurrency(message.getChatId());
+        Currency targetCurrency = currencyModeService.getTargetCurrency(message.getChatId());
+
+        for (Currency currency : Currency.values()) {
+            buttons.add(
+                    Arrays.asList(
+                                            /* тут мы должны указать какой то URL, опалата ли это pay(), или callBackData
+                                            Обычно в callBackData зашивается какойто json обьект,
+                                            чтобы при нажатии кнопки к нам приходила только callBackData и нам чтобы знать надо хзашивать в нее команду
+                                            однако в нашем простом боте будет только один юз кейс выбор валюты*/
+                            InlineKeyboardButton.builder()
+                                    .text(getCurrencyButton(originalCurrency, currency))
+                                    .callbackData("ORIGINAL:" + currency)
+                                    .build(),
+                            InlineKeyboardButton.builder()
+                                    .text(getCurrencyButton(targetCurrency, currency))
+                                    .callbackData("TARGET:" + currency)
+                                    .build()
+                    ));
+        }
+        //Можно использовать метод UpdateEditMessage но мы используем EditMessageReplyMarkUp для изменения исключительно кнопок
+        //Мы обновляем галочки у выбранных валют
+        execute(
+                EditMessageReplyMarkup.builder()
+                        .chatId(message.getChatId().toString())
+                        .messageId(message.getMessageId())
+                        .replyMarkup(InlineKeyboardMarkup.builder()
+                                .keyboard(buttons)
+                                .build())
+                        .build());
     }
 
     @SneakyThrows
@@ -84,7 +143,7 @@ public class AlexVisBot extends TelegramLongPollingBot {
                                             чтобы при нажатии кнопки к нам приходила только callBackData и нам чтобы знать надо хзашивать в нее команду
                                             однако в нашем простом боте будет только один юз кейс выбор валюты*/
                                             InlineKeyboardButton.builder()
-                                                    .text(getCurrencyButton(targetCurrency, currency))
+                                                    .text(getCurrencyButton(originalCurrency, currency))
                                                     .callbackData("ORIGINAL:" + currency)
                                                     .build(),
                                             InlineKeyboardButton.builder()
@@ -103,6 +162,36 @@ public class AlexVisBot extends TelegramLongPollingBot {
                         return;
                 }
             }
+        }
+
+        if (message.hasText()) {
+            String text = message.getText();
+            Optional<Double> value = parseDouble(text);
+            Currency original = currencyModeService.getOriginalCurrency(message.getChatId());
+            Currency target = currencyModeService.getTargetCurrency(message.getChatId());
+            double ratio = conversionService.getConversionRatio(original, target);
+
+            if (value.isPresent()) {
+                //Так мы выводм сообщения  в чат
+                execute(SendMessage.builder()
+                        .chatId(message.getChatId().toString())
+                        .text(String.format(
+                                "%4.2f %s is %4.2f %s",
+                                value.get(),
+                                original,
+                                value.get() * ratio,
+                                target
+                        ))
+                        .build());
+            }
+        }
+    }
+
+    private Optional<Double> parseDouble(String text) {
+        try {
+            return Optional.of(Double.parseDouble(text));
+        } catch (Exception e) {
+            return Optional.empty();
         }
     }
 }
