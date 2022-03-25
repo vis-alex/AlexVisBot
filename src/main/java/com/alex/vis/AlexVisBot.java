@@ -1,6 +1,7 @@
 package com.alex.vis;
 
 import com.alex.vis.entity.Currency;
+import com.alex.vis.service.CurrencyModeService;
 import lombok.SneakyThrows;
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
 import org.telegram.telegrambots.meta.TelegramBotsApi;
@@ -17,8 +18,10 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 
-public class AlexVisBot extends TelegramLongPollingBot
-{
+public class AlexVisBot extends TelegramLongPollingBot {
+
+    private final CurrencyModeService currencyModeService = CurrencyModeService.getInstance();
+
     //Заменяет throws Exception в сигнатуре метода
     @SneakyThrows
     public static void main(String[] args ) {
@@ -30,6 +33,11 @@ public class AlexVisBot extends TelegramLongPollingBot
         //После регистрации бота создался отдельный поток который будет непрерывно отправлять сообщения
         // на телеграмм getUpdate, и если пришел новый апдейт он вызовет onUpdateReceive()
         telegramBotsApi.registerBot(bot);
+    }
+
+    //Метод для вывода в чате смайлика валюты рядом с текущей выбранной валютой
+    private String getCurrencyButton(Currency saved, Currency current) {
+        return saved == current ?  current + "✅" :  current.name();
     }
 
     @Override
@@ -65,6 +73,9 @@ public class AlexVisBot extends TelegramLongPollingBot
                 switch(command) {
                     case "/set_currency":
                         List<List<InlineKeyboardButton>> buttons = new ArrayList<>();
+                        Currency originalCurrency = currencyModeService.getOriginalCurrency(message.getChatId());
+                        Currency targetCurrency = currencyModeService.getTargetCurrency(message.getChatId());
+
                         for (Currency currency : Currency.values()) {
                             buttons.add(
                                     Arrays.asList(
@@ -72,8 +83,14 @@ public class AlexVisBot extends TelegramLongPollingBot
                                             Обычно в callBackData зашивается какойто json обьект,
                                             чтобы при нажатии кнопки к нам приходила только callBackData и нам чтобы знать надо хзашивать в нее команду
                                             однако в нашем простом боте будет только один юз кейс выбор валюты*/
-                                            InlineKeyboardButton.builder().text(currency.name()).callbackData("ORIGINAL:" + currency).build(),
-                                            InlineKeyboardButton.builder().text(currency.name()).callbackData("TARGET:" + currency).build()
+                                            InlineKeyboardButton.builder()
+                                                    .text(getCurrencyButton(targetCurrency, currency))
+                                                    .callbackData("ORIGINAL:" + currency)
+                                                    .build(),
+                                            InlineKeyboardButton.builder()
+                                                    .text(getCurrencyButton(targetCurrency, currency))
+                                                    .callbackData("TARGET:" + currency)
+                                                    .build()
                                     ));
                         }
 
