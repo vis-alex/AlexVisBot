@@ -17,5 +17,4 @@ public interface CurrencyModeService {
 
     void setTargetCurrency(long chatId, Currency currency);
 
-
 }
